@@ -2,25 +2,23 @@ var path = require('path');
 var archive = require('../helpers/archive-helpers');
 var fs = require('fs');
 var qs = require('querystring');
-// require more modules/folders here!
+var helpers = require('./http-helpers');
+var effin = require('../workers/htmlfetcher');
 
-archive.downloadUrls(['www.google.com']);
 exports.handleRequest = function (req, res) {
 
-	console.log( "\n\nREQ URL:",req.url );
-	console.log( "REQ METHOD:",req.method );
+	var statusCode = 200;
 
 	
 	if ( req.method === "POST"){
 
-		var serveFile;
+			var serveFile;
 
 			// serve index
 			if ( req.url === '/' ){
 				fs.readFile( (archive.paths.siteAssets+'/index.html'), function(err, data) {
 				  if (err) throw err;
 				  serveFile = data;
-				  // res.end(data);
 				});
 			} 
 					
@@ -34,87 +32,74 @@ exports.handleRequest = function (req, res) {
 
 			req.on('end', function() {
 
-				console.log("DATA FROM POST", dataUrl);
+				archive.isUrlArchived(dataUrl, function(downloaded){
+					// if downloaded, return file
+					if ( downloaded ){
+						archive.returnArchive( dataUrl, function(page){
+							statusCode = 200;
+							res.writeHead(statusCode, helpers.headers)
+							res.end(page);
+						});
+					}
+					// if not downloaded, get the list
+					else {
 
-				fs.readFile( 
-					// check in archivedSites
-					(archive.paths.archivedSites+dataUrl), 
-					function(err, archivedFile) {
-
-						// if not in archivedSites
-					  if (err) {
-					  	// get the list
-					  	fs.readFile( (archive.paths.list), function(err, list) {
-								  if (err){ console.log("LIST WASNT FOUND"); }
-								  
-								  // CHECK IN LIST IF IT INCLUDES DATAURL
-								  var splitList = list.toString().split(',');
-
-								  if ( !splitList.includes(dataUrl) ){
-
-								  	var newFileContent = list.length === 0 ? dataUrl : (list+","+dataUrl);
-								  	// add url to list
-									  fs.writeFile(archive.paths.list, newFileContent, 
-									  	function(err) { if (err) throw err;
-										  console.log('ADDED URL: '+dataUrl,list.toString());
-										});
-
-								  } else {
-								  	console.log("LIST HAD URL: "+dataUrl)
-								  }
-								  
-								  // we alrways respond with loading.html
-								  fs.readFile( (archive.paths.siteAssets+'/loading.html'), function(err, loadingFile) {
-										  // if (err) throw err;
-										  if (err) console.log("ERROR SENDING LOADING FILE",err);
-										  // console.log("Serving to loading: ",loadingFile.toString('ascii'));
-										  serveFile = loadingFile.toString('ascii');
-										  res.end(serveFile);
-									});
-
+						archive.isUrlInList( dataUrl, function(answer){ 
+							if (answer === false){
+								archive.addUrlToList( dataUrl );
+							}
+							archive.serveLoading(function(page){
+								statusCode = 302;
+								res.writeHead(statusCode, helpers.headers)
+								res.end(page);
+								effin.mothaFetcher();
 							});
-					  } else {
-						  // if site IS in archives
-						  // respond with page in archives
-						  // console.log("Serving to archived: ",archivedFile.toString('ascii'));
-						  serveFile = archivedFile.toString('ascii');
-						  res.end(serveFile);
-					  }
-
+						});
+					}
 				});
-
 			});
 
-			// console.log("FINAL SERVE", serveFile)
-			// res.end(serveFile);
-			
-	}
 
+	}//if POST
 
 	else if ( req.method === "GET"){
+
+		var regex = new RegExp('(https?:\/\/(?:www\.|(?!www))[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]{2,}|www\.[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]{2,}|https?:\/\/(?:www\.|(?!www))[a-zA-Z0-9]\.[^\s]{2,}|www\.[a-zA-Z0-9]\.[^\s]{2,})');
 
 			// serve index
 			if ( req.url === '/' ){
 
-					fs.readFile( 
-						// url
-						(archive.paths.siteAssets+'/index.html'), 
-						// callback
-						function(err, data) {
-						  if (err) throw err;
-						  res.end(data);
-						});
+				fs.readFile((archive.paths.siteAssets+'/index.html'), function(err, data) {
+				  if (err) throw err;
+				  res.end(data);
+				});
 			}
 			// serve style
 			else if ( req.url === '/styles.css' ){
 
-					fs.readFile( ( archive.paths.siteAssets + req.url ), function(err, data) {
-					  if (err) throw err;
-					  res.end(data);
-					});
+				fs.readFile( ( archive.paths.siteAssets + req.url ), function(err, data) {
+				  if (err) throw err;
+				  res.end(data);
+				});
+			}
+
+			// when getting urls
+			else if ( req.url.match( regex ) ){
+				archive.returnArchive( req.url, function(page){
+					statusCode = 200;
+					res.writeHead(statusCode, helpers.headers)
+					res.end(page);
+				});
+			}
+
+			// when other page
+			else {
+				archive.serveLoading(function(page){
+					statusCode = 404;
+					res.writeHead(statusCode, helpers.headers)
+					res.end(page);
+				});
 			}
 	}
 
-			
-
-};
+}; // exports
